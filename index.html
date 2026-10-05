@@ -33,6 +33,7 @@ button,input{font:inherit;color:inherit}
 .er{display:flex;align-items:center;gap:14px;padding:13px 2px;border-bottom:1px solid var(--ln)}
 .ck{width:30px;height:30px;border-radius:50%;border:2px solid var(--mut);flex:none;display:flex;align-items:center;justify-content:center;color:#111;font-weight:800}
 .er.on .ck{background:var(--ac);border-color:var(--ac)}.er.on .in{color:var(--mut)}
+.th{width:92px;height:52px;border-radius:8px;object-fit:cover;background:var(--ln);flex:none}
 .sum{font-size:14px;line-height:1.55;margin-top:16px;color:#d6d6dc}
 .big{display:flex;gap:28px;background:var(--card);border-radius:16px;padding:18px}.big b{font-size:38px;display:block;line-height:1}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
@@ -55,7 +56,7 @@ nav button.on{color:var(--ac);font-weight:700}nav button.on span{filter:none;opa
 <nav id="nav"></nav>
 <script>
 const K='minha-watchlist-v2',API='https://api.tvmaze.com';
-let S=[],tab='watch',cur=null,ss=null,arm=false,Q='',R=null,busy=0,msg='';
+let S=[],tab='watch',cur=null,ss=null,arm=false,Q='',R=null,busy=0,msg='',sv='mine',D=null,pv=null;
 try{S=JSON.parse(localStorage.getItem(K)||'[]')}catch(e){S=[]}
 function save(){try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}}
 const $=id=>document.getElementById(id);
@@ -67,6 +68,8 @@ const done=s=>tot(s)>0&&seen(s)>=tot(s);
 const days=s=>s.last?Math.floor((Date.now()-s.last)/864e5):null;
 const fmt=d=>d.split('-').reverse().join('/');
 const today=()=>new Date().toISOString().slice(0,10);
+const img=x=>((x.image&&x.image.medium)||'').replace('http:','https:');
+const pool=()=>[...(Array.isArray(R)?R:[]),...(Array.isArray(D)?D:[])];
 const po=u=>u?`<img class="po" src="${esc(u)}" alt="" loading="lazy">`:'<div class="po"></div>';
 function nextEp(s){for(let i=0;i<s.seasons.length;i++)for(let e=1;e<=s.seasons[i];e++)if(!s.w[(i+1)+'-'+e])return[i+1,e];return null}
 function item(s,btn){
@@ -87,7 +90,46 @@ function watch(){
 function grid(l){return `<div class="pg">${l.map(s=>`<div onclick="det('${s.id}')">${po(s.img)}<div class="mut" style="margin-top:6px">${s.fav?'★ ':''}${esc(s.name)}</div></div>`).join('')}</div>`}
 function all(){
   const l=[...S].sort((a,b)=>(b.fav-a.fav)||a.name.localeCompare(b.name));
-  return `<h1>Séries</h1>`+(l.length?grid(l):'<div class="empty">Nenhuma série ainda.</div>');
+  const sw=`<div class="chips" style="margin:0 0 16px"><button class="chip ${sv==='mine'?'on':''}" onclick="svw('mine')">Minhas séries</button><button class="chip ${sv==='disc'?'on':''}" onclick="svw('disc')">Descobrir</button></div>`;
+  return `<h1>Séries</h1>`+sw+(sv==='disc'?disc():l.length?grid(l):'<div class="empty">Nenhuma série ainda.<br>Use Descobrir ou Buscar para adicionar.</div>');
+}
+function svw(v){sv=v;if(v==='disc'&&!D)loadDisc();render()}
+function disc(){
+  if(D==='load'||!D)return '<div class="empty">Carregando séries em alta…</div>';
+  if(D==='err')return '<div class="empty">Não consegui carregar agora. Confira a internet.<br><button class="lnk" onclick="loadDisc()">Tentar de novo</button></div>';
+  const l=D.filter(x=>!S.some(s=>s.tv===x.id));
+  return '<div class="mut" style="margin:-6px 0 12px">Séries no ar nos últimos dias, das mais populares para as menos</div>'+(l.length?`<div class="pg">${l.map(x=>`<div onclick="prev(${x.id})">${po(img(x))}<div class="mut" style="margin-top:6px">${esc(x.name)}</div></div>`).join('')}</div>`:'<div class="empty">Nada novo por aqui.</div>');
+}
+async function loadDisc(){
+  D='load';render();
+  try{
+    const u=[];for(let i=0;i<5;i++){const d=new Date(Date.now()-i*864e5).toISOString().slice(0,10);u.push(API+'/schedule/web?date='+d,API+'/schedule?country=US&date='+d)}
+    const rs=await Promise.all(u.map(x=>fetch(x).then(r=>r.ok?r.json():[]).catch(()=>[])));
+    const m={};rs.flat().forEach(e=>{const sh=(e._embedded&&e._embedded.show)||e.show;if(sh&&sh.image&&['Scripted','Animation','Documentary'].includes(sh.type))m[sh.id]=sh});
+    const l=Object.values(m).sort((a,b)=>(b.weight||0)-(a.weight||0)).slice(0,45);
+    if(!l.length)throw 0;D=l;
+  }catch(e){D='err'}
+  render();
+}
+function prev(id){pv=id;render();scrollTo(0,0)}
+function preview(){
+  const x=Array.isArray(D)&&D.find(z=>z.id===pv);if(!x)return '';
+  const net=(x.network&&x.network.name)||(x.webChannel&&x.webChannel.name)||'',r=x.rating&&x.rating.average;
+  const act=busy===x.id?'<div class="mut" style="margin-top:14px">Adicionando…</div>':`<div class="btns"><button class="sm" onclick="addShow(${x.id},'watching')">Assistindo</button><button class="sm" onclick="addShow(${x.id},'want')">Quero ver</button><button class="sm" onclick="addShow(${x.id},'done')">Já vi tudo</button></div>`;
+  return `<div class="hero" style="--img:url('${esc(img(x))}')"><button class="back" onclick="back()">‹ Voltar</button><div style="display:flex;gap:14px">${po(img(x))}<div class="in"><h1 style="margin:0 0 6px;font-size:24px">${esc(x.name)}</h1>
+  <div class="mut">${[(x.premiered||'').slice(0,4),net,r?'★ '+r:''].filter(Boolean).map(esc).join(' · ')}</div><div class="mut">${esc((x.genres||[]).join(', '))}</div></div></div></div>
+  ${msg?`<div class="mut" style="margin-top:12px">${msg}</div>`:''}${act}<div class="sum">${esc((x.summary||'').replace(/<[^>]+>/g,''))}</div>`;
+}
+async function epsOf(id){
+  const r=await fetch(API+'/shows/'+id+'/episodes');if(!r.ok)throw 0;
+  const c=[],en={};
+  (await r.json()).forEach(e=>{if(e.number!=null){c[e.season-1]=(c[e.season-1]||0)+1;en[e.season+'-'+e.number]=[e.name||'',e.airdate||'',((e.image&&e.image.medium)||'').replace('http:','https:')]}});
+  for(let i=0;i<c.length;i++)c[i]=c[i]||0;
+  return{c,en};
+}
+async function sync(s){
+  if(!s||!s.tv||s.en&&Date.now()-(s.sync||0)<864e5)return;
+  try{const x=await epsOf(s.tv);s.seasons=x.c;s.en=x.en;s.sync=Date.now();save();if(cur===s.id)render()}catch(e){}
 }
 function stats(){
   const eps=S.reduce((a,s)=>a+seen(s),0),m=eps*45,f=S.filter(s=>s.fav);
@@ -119,17 +161,14 @@ function res(){
     <div class="mut">${[y,r?'★ '+r:'',(sh.genres||[]).slice(0,2).join(', ')].filter(Boolean).map(esc).join(' · ')}</div>${act}</div></div>`}).join('');
 }
 async function addShow(id,st){
-  const sh=R.find(x=>x.id===id);busy=id;msg='';render();
+  const sh=pool().find(x=>x.id===id);busy=id;msg='';render();
   try{
-    const r=await fetch(API+'/shows/'+id+'/episodes');if(!r.ok)throw 0;
-    const c=[],en={};
-    (await r.json()).forEach(e=>{if(e.number!=null){c[e.season-1]=(c[e.season-1]||0)+1;en[e.season+'-'+e.number]=[e.name||'',e.airdate||'']}});
-    for(let i=0;i<c.length;i++)c[i]=c[i]||0;
+    const {c,en}=await epsOf(id);
     const s={id:'t'+id,tv:id,name:sh.name,img:((sh.image&&sh.image.medium)||'').replace('http:','https:'),sum:(sh.summary||'').replace(/<[^>]+>/g,''),
       rate:(sh.rating&&sh.rating.average)||null,year:(sh.premiered||'').slice(0,4),genres:sh.genres||[],
-      net:(sh.network&&sh.network.name)||(sh.webChannel&&sh.webChannel.name)||'',seasons:c,en:en,w:{},status:st==='done'?'watching':st,fav:false,last:null};
+      net:(sh.network&&sh.network.name)||(sh.webChannel&&sh.webChannel.name)||'',seasons:c,en:en,w:{},status:st==='done'?'watching':st,fav:false,last:null,sync:Date.now()};
     if(st==='done'){c.forEach((n,i)=>{for(let e=1;e<=n;e++)s.w[(i+1)+'-'+e]=1});s.last=Date.now()}
-    S.push(s);save();
+    S.push(s);save();if(pv===id){pv=null;cur=s.id;ss=null}
   }catch(e){msg='Não deu para adicionar agora. Tente de novo.'}
   busy=0;render();
 }
@@ -138,7 +177,7 @@ function detail(){
   if(ss==null||!s.seasons[ss-1]){const n=nextEp(s);ss=n?n[0]:1}
   const chips=s.seasons.map((c,i)=>c?`<button class="chip ${ss===i+1?'on':''}" onclick="season(${i+1})">T${i+1}</button>`:'').join('');
   let rows='';for(let e=1;e<=(s.seasons[ss-1]||0);e++){const k=ss+'-'+e,x=s.en&&s.en[k];
-    rows+=`<div class="er ${s.w[k]?'on':''}" onclick="tog('${s.id}',${ss},${e})"><div class="ck">${s.w[k]?'✓':''}</div><div class="in"><div>E${e}${x&&x[0]?' · '+esc(x[0]):''}</div>${x&&x[1]?`<div class="mut">${fmt(x[1])}</div>`:''}</div></div>`}
+    rows+=`<div class="er ${s.w[k]?'on':''}" onclick="tog('${s.id}',${ss},${e})"><div class="ck">${s.w[k]?'✓':''}</div>${x&&x[2]?`<img class="th" src="${esc(x[2])}" alt="" loading="lazy">`:''}<div class="in"><div>E${e}${x&&x[0]?' · '+esc(x[0]):''}</div>${x&&x[1]?`<div class="mut">${fmt(x[1])}</div>`:''}</div></div>`}
   const st=(v,l)=>`<button class="chip ${s.status===v?'on':''}" onclick="setSt('${s.id}','${v}')">${l}</button>`;
   return `<div class="hero" style="--img:url('${esc(s.img)}')"><button class="back" onclick="back()">‹ Voltar</button><div style="display:flex;gap:14px">${po(s.img)}<div class="in"><h1 style="margin:0 0 6px;font-size:24px">${esc(s.name)}</h1>
   <div class="mut">${[s.year,s.net,s.rate?'★ '+s.rate:''].filter(Boolean).map(esc).join(' · ')}</div><div class="mut">${esc((s.genres||[]).join(', '))}</div>
@@ -149,7 +188,7 @@ function detail(){
   <div style="text-align:right"><button class="lnk" onclick="seas('${s.id}',${ss})">Marcar temporada toda</button></div>${rows}
   <button class="lnk" style="margin-top:28px" onclick="del('${s.id}')">${arm?'Toque de novo para excluir':'Excluir série'}</button>`;
 }
-function det(id){cur=id;ss=null;arm=false;render();scrollTo(0,0)}
+function det(id){cur=id;ss=null;arm=false;render();scrollTo(0,0);sync(get(id))}
 function season(n){ss=n;render()}
 function tog(id,sn,e){const s=get(id),k=sn+'-'+e;if(s.w[k])delete s.w[k];else{s.w[k]=1;s.last=Date.now();if(s.status==='want')s.status='watching'}save();render()}
 function seas(id,sn){const s=get(id),c=s.seasons[sn-1];let a=true;for(let e=1;e<=c;e++)if(!s.w[sn+'-'+e])a=false;
@@ -159,11 +198,11 @@ function mark(id){const s=get(id),n=nextEp(s);if(!n)return;s.w[n[0]+'-'+n[1]]=1;
 function fav(id){const s=get(id);s.fav=!s.fav;save();render()}
 function setSt(id,v){get(id).status=v;save();render()}
 function del(id){if(!arm){arm=true;render();return}S=S.filter(x=>x.id!==id);cur=null;arm=false;save();render()}
-function back(){cur=null;render()}
-function go(t){tab=t;cur=null;render();scrollTo(0,0)}
+function back(){cur=null;pv=null;render()}
+function go(t){tab=t;cur=null;pv=null;render();scrollTo(0,0)}
 function render(){
-  $('app').innerHTML=cur?detail():({watch,all,stats,add}[tab])();
-  $('nav').innerHTML=[['watch','📺','Assistir'],['all','🎞️','Séries'],['add','🔍','Buscar'],['stats','👤','Perfil']].map(([k,i,l])=>`<button class="${tab===k&&!cur?'on':''}" onclick="go('${k}')"><span>${i}</span>${l}</button>`).join('');
+  $('app').innerHTML=cur?detail():pv?preview():({watch,all,stats,add}[tab])();
+  $('nav').innerHTML=[['watch','📺','Assistir'],['all','🎞️','Séries'],['add','🔍','Buscar'],['stats','👤','Perfil']].map(([k,i,l])=>`<button class="${tab===k&&!cur&&!pv?'on':''}" onclick="go('${k}')"><span>${i}</span>${l}</button>`).join('');
 }
 render();
 </script>
